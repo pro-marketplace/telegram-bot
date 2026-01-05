@@ -365,10 +365,21 @@ export default function TelegramCallbackPage() {
 
 ## Таблица telegram_auth_tokens
 
-Расширение автоматически создаёт таблицу при первом запросе:
+**ВАЖНО:** Таблица должна быть создана заранее (расширение НЕ создаёт таблицы автоматически).
+
+### Проверка структуры перед установкой
 
 ```sql
-CREATE TABLE IF NOT EXISTS telegram_auth_tokens (
+SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_name = 'telegram_auth_tokens'
+ORDER BY ordinal_position;
+```
+
+### Требуемая структура
+
+```sql
+CREATE TABLE telegram_auth_tokens (
     id SERIAL PRIMARY KEY,
     token_hash VARCHAR(64) UNIQUE NOT NULL,
     telegram_id VARCHAR(50),
@@ -381,5 +392,14 @@ CREATE TABLE IF NOT EXISTS telegram_auth_tokens (
     used BOOLEAN DEFAULT FALSE
 );
 ```
+
+### Если структура отличается
+
+Код использует следующие поля:
+- `token_hash` — SHA256 хеш токена (НЕ `token`!)
+- `telegram_id`, `telegram_username`, `telegram_first_name`, `telegram_last_name`
+- `telegram_photo_url`, `expires_at`, `used`, `created_at`
+
+**Если в БД другие названия столбцов — нужно либо изменить таблицу, либо адаптировать код!**
 
 **Важно:** `token_hash` — это SHA256 хеш токена, а не сам токен!
