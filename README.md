@@ -57,13 +57,18 @@ SSO авторизация через Telegram бота. **1 функция** с
 **ОБЯЗАТЕЛЬНО вызови тулу `put_secret` для КАЖДОГО секрета!**
 
 ```python
-put_secret("TELEGRAM_BOT_USERNAME", "<username бота от пользователя, без @>")
-put_secret("SITE_URL", "https://{домен-пользователя}")
+# Для auth функции
 put_secret("JWT_SECRET", "<сгенерируй: 64 hex символа>")
+
+# Для bot функции
+put_secret("TELEGRAM_BOT_TOKEN", "<токен бота от BotFather>")
+put_secret("TELEGRAM_BOT_USERNAME", "<username бота без @>")
+put_secret("SITE_URL", "https://{домен-пользователя}")
 ```
 
 - Вызывай `put_secret` для КАЖДОГО секрета отдельно
 - **JWT_SECRET генерируй сам** (64 hex символа)
+- **TELEGRAM_BOT_TOKEN** — получи у пользователя (от BotFather)
 - Покажи пользователю в чате каждый вызов тулы
 
 ## После установки скажи пользователю
@@ -119,49 +124,107 @@ put_secret("SITE_URL", "https://{домен-пользователя}")
 put_secret("JWT_SECRET", "<сгенерируй: 64 hex символа>")
 ```
 
-### Шаг 4: Настройка бота
+### Шаг 4: Создание бот-функции (Cloud Function)
 
-Бот должен обрабатывать команду `/start web_auth`:
+Бот развёртывается как отдельная облачная функция с webhook.
 
-1. Сгенерировать UUID токен
-2. Сохранить токен в таблицу `telegram_auth_tokens` с данными пользователя
-3. Показать сообщение с кнопкой-ссылкой
+**Создай функцию `/backend/telegram-bot/`:**
 
-**SQL для сохранения токена (бот выполняет напрямую):**
+```python
+# /backend/telegram-bot/index.py
+import json
+import os
+import uuid
+import hashlib
+import psycopg2
 
-```sql
-INSERT INTO telegram_auth_tokens
-(token_hash, telegram_id, telegram_username, telegram_first_name,
- telegram_last_name, telegram_photo_url, expires_at)
-VALUES (
-  SHA256('uuid-токен'),
-  '123456789',
-  'username',
-  'Имя',
-  'Фамилия',
-  NULL,
-  NOW() + INTERVAL '5 minutes'
-);
+def handler(event: dict, context) -> dict:
+    '''Telegram Bot Webhook — обработка /start web_auth'''
+
+    if event.get('httpMethod') == 'OPTIONS':
+        return {'statusCode': 200, 'headers': {'Access-Control-Allow-Origin': '*'}, 'body': ''}
+
+    body = json.loads(event.get('body', '{}'))
+    message = body.get('message', {})
+    text = message.get('text', '')
+    user = message.get('from', {})
+    chat_id = message.get('chat', {}).get('id')
+
+    if not text.startswith('/start web_auth'):
+        return {'statusCode': 200, 'body': ''}
+
+    # Генерируем токен
+    token = str(uuid.uuid4())
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+    # Сохраняем в БД
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO telegram_auth_tokens
+        (token_hash, telegram_id, telegram_username, telegram_first_name,
+         telegram_last_name, telegram_photo_url, expires_at)
+        VALUES (%s, %s, %s, %s, %s, %s, NOW() + INTERVAL '5 minutes')
+    ''', (token_hash, str(user.get('id')), user.get('username'),
+          user.get('first_name'), user.get('last_name'), None))
+    conn.commit()
+    conn.close()
+
+    # Отправляем сообщение с кнопкой
+    site_url = os.environ['SITE_URL']
+    auth_url = f"{site_url}/auth/telegram/callback?token={token}"
+
+    import requests
+    bot_token = os.environ['TELEGRAM_BOT_TOKEN']
+    requests.post(f'https://api.telegram.org/bot{bot_token}/sendMessage', json={
+        'chat_id': chat_id,
+        'text': 'Авторизация готова!\n\nНажмите на кнопку ниже, чтобы войти на сайт 👇🏼\n\nСсылка действительна 5 минут',
+        'reply_markup': {
+            'inline_keyboard': [[{'text': 'Войти на сайт', 'url': auth_url}]]
+        }
+    })
+
+    return {'statusCode': 200, 'body': ''}
 ```
 
-**Пример сообщения бота:**
-
+**requirements.txt:**
 ```
-Авторизация готова!
-
-Нажмите на кнопку ниже, чтобы войти на сайт 👇🏼
-
-[Войти на сайт] ← кнопка со ссылкой
-
-Ссылка действительна 5 минут
+psycopg2-binary
+requests
 ```
 
-**Ссылка в кнопке:**
-```
-https://{SITE_URL}/auth/telegram/callback?token={uuid-токен}
+### Шаг 5: Настройка Webhook
+
+После деплоя функции нужно зарегистрировать webhook в Telegram.
+
+**Скажи пользователю:**
+
+> Функция бота задеплоена! Теперь нужно подключить webhook.
+>
+> Выполните в браузере или терминале:
+> ```
+> https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url={URL_ФУНКЦИИ_БОТА}
+> ```
+>
+> Где:
+> - `{TELEGRAM_BOT_TOKEN}` — токен вашего бота от BotFather
+> - `{URL_ФУНКЦИИ_БОТА}` — URL из func2url.json для telegram-bot
+>
+> Пример:
+> ```
+> https://api.telegram.org/bot123456:ABC.../setWebhook?url=https://functions.poehali.dev/xxx-telegram-bot
+> ```
+>
+> После этого бот начнёт получать сообщения!
+
+### Шаг 6: Добавление секретов для бота
+
+```python
+put_secret("TELEGRAM_BOT_TOKEN", "<токен бота от BotFather>")
+put_secret("SITE_URL", "https://{домен-пользователя}")
 ```
 
-### Шаг 5: Создание страниц
+### Шаг 7: Создание страниц
 
 1. **Страница с кнопкой входа** — добавь `TelegramLoginButton`
 2. **Страница callback** `/auth/telegram/callback` — обработка токена
@@ -258,13 +321,31 @@ export default function TelegramCallbackPage() {
 ```
 1. Пользователь нажимает "Войти через Telegram"
 2. Открывается t.me/botname?start=web_auth
-3. Бот генерирует UUID токен
-4. Бот сохраняет токен в telegram_auth_tokens
-5. Бот показывает кнопку со ссылкой
-6. Пользователь нажимает кнопку
-7. Callback страница → POST ?action=callback { token }
-8. API возвращает JWT + user
-9. Готово!
+3. Telegram отправляет webhook на бот-функцию
+4. Бот-функция генерирует UUID токен
+5. Бот-функция сохраняет токен в telegram_auth_tokens
+6. Бот-функция отправляет сообщение с кнопкой через Telegram API
+7. Пользователь нажимает кнопку в Telegram
+8. Callback страница → POST ?action=callback { token }
+9. Auth API возвращает JWT + user
+10. Готово!
+```
+
+## Архитектура
+
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────────┐
+│  Frontend   │───▶│  Telegram   │───▶│  telegram-bot   │
+│  (Button)   │    │   (App)     │    │ (Cloud Function)│
+└─────────────┘    └─────────────┘    └────────┬────────┘
+                                               │
+                         ┌─────────────────────┘
+                         │ INSERT token
+                         ▼
+┌─────────────┐    ┌─────────────┐    ┌─────────────────┐
+│  Frontend   │───▶│telegram-auth│◀───│    Database     │
+│ (Callback)  │    │(Cloud Func) │    │   (PostgreSQL)  │
+└─────────────┘    └─────────────┘    └─────────────────┘
 ```
 
 ---
