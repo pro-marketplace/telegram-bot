@@ -79,7 +79,7 @@ def handle_web_auth(chat_id: int, user: dict) -> None:
 
     token = save_auth_token(telegram_id, username, first_name, last_name)
 
-    site_url = os.environ["SITE_URL"]
+    site_url = os.environ["SITE_URL"].rstrip("/")
     auth_url = f"{site_url}/auth/telegram/callback?token={token}"
 
     send_message(
