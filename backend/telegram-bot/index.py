@@ -26,10 +26,20 @@ def handler(event: dict, context) -> dict:
             'headers': {
                 'Access-Control-Allow-Origin': '*',
                 'Access-Control-Allow-Methods': 'POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type',
+                'Access-Control-Allow-Headers': 'Content-Type, X-Telegram-Bot-Api-Secret-Token',
             },
             'body': '',
         }
+
+    # Verify webhook secret (set via setWebhook with secret_token parameter)
+    headers = event.get('headers', {})
+    headers_lower = {k.lower(): v for k, v in headers.items()}
+    webhook_secret = os.environ.get('TELEGRAM_WEBHOOK_SECRET')
+
+    if webhook_secret:
+        request_secret = headers_lower.get('x-telegram-bot-api-secret-token', '')
+        if request_secret != webhook_secret:
+            return {'statusCode': 401, 'body': json.dumps({'error': 'Unauthorized'})}
 
     body = json.loads(event.get('body', '{}'))
 
@@ -65,41 +75,45 @@ def handle_web_auth(chat_id: int, user: dict) -> dict:
     first_name = user.get('first_name')
     last_name = user.get('last_name')
 
-    conn = psycopg2.connect(os.environ['DATABASE_URL'])
-    cursor = conn.cursor()
+    conn = None
+    try:
+        conn = psycopg2.connect(os.environ['DATABASE_URL'])
+        cursor = conn.cursor()
 
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS telegram_auth_tokens (
-            id SERIAL PRIMARY KEY,
-            token_hash VARCHAR(64) UNIQUE NOT NULL,
-            telegram_id VARCHAR(50),
-            telegram_username VARCHAR(255),
-            telegram_first_name VARCHAR(255),
-            telegram_last_name VARCHAR(255),
-            telegram_photo_url TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            expires_at TIMESTAMP NOT NULL,
-            used BOOLEAN DEFAULT FALSE
-        )
-    ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS telegram_auth_tokens (
+                id SERIAL PRIMARY KEY,
+                token_hash VARCHAR(64) UNIQUE NOT NULL,
+                telegram_id VARCHAR(50),
+                telegram_username VARCHAR(255),
+                telegram_first_name VARCHAR(255),
+                telegram_last_name VARCHAR(255),
+                telegram_photo_url TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                used BOOLEAN DEFAULT FALSE
+            )
+        ''')
 
-    cursor.execute('''
-        INSERT INTO telegram_auth_tokens
-        (token_hash, telegram_id, telegram_username, telegram_first_name,
-         telegram_last_name, telegram_photo_url, expires_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-    ''', (
-        token_hash,
-        telegram_id,
-        username,
-        first_name,
-        last_name,
-        None,
-        datetime.now(timezone.utc) + timedelta(minutes=5)
-    ))
+        cursor.execute('''
+            INSERT INTO telegram_auth_tokens
+            (token_hash, telegram_id, telegram_username, telegram_first_name,
+             telegram_last_name, telegram_photo_url, expires_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ''', (
+            token_hash,
+            telegram_id,
+            username,
+            first_name,
+            last_name,
+            None,
+            datetime.now(timezone.utc) + timedelta(minutes=5)
+        ))
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
 
     site_url = os.environ['SITE_URL']
     auth_url = f"{site_url}/auth/telegram/callback?token={token}"

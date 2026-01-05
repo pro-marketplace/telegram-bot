@@ -64,11 +64,13 @@ put_secret("JWT_SECRET", "<сгенерируй: 64 hex символа>")
 put_secret("TELEGRAM_BOT_TOKEN", "<токен бота от BotFather>")
 put_secret("TELEGRAM_BOT_USERNAME", "<username бота без @>")
 put_secret("SITE_URL", "https://{домен-пользователя}")
+put_secret("TELEGRAM_WEBHOOK_SECRET", "<секретный токен для webhook>")
 ```
 
 - Вызывай `put_secret` для КАЖДОГО секрета отдельно
 - **JWT_SECRET генерируй сам** (64 hex символа)
 - **TELEGRAM_BOT_TOKEN** — получи у пользователя (от BotFather)
+- **TELEGRAM_WEBHOOK_SECRET** — сгенерируй случайную строку (1-256 символов)
 - Покажи пользователю в чате каждый вызов тулы
 
 ## После установки скажи пользователю
@@ -195,27 +197,33 @@ requests
 
 ### Шаг 5: Настройка Webhook
 
-После деплоя функции нужно зарегистрировать webhook в Telegram.
+После деплоя функции нужно зарегистрировать webhook в Telegram с секретным токеном для безопасности.
 
 **Скажи пользователю:**
 
 > Функция бота задеплоена! Теперь нужно подключить webhook.
 >
-> Выполните в браузере или терминале:
+> **1. Сгенерируйте секретный токен** (любая строка 1-256 символов):
 > ```
-> https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url={URL_ФУНКЦИИ_БОТА}
+> Например: my_super_secret_webhook_token_12345
 > ```
 >
-> Где:
-> - `{TELEGRAM_BOT_TOKEN}` — токен вашего бота от BotFather
-> - `{URL_ФУНКЦИИ_БОТА}` — URL из func2url.json для telegram-bot
+> **2. Зарегистрируйте webhook** (выполните в браузере):
+> ```
+> https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url={URL_ФУНКЦИИ_БОТА}&secret_token={WEBHOOK_SECRET}
+> ```
 >
 > Пример:
 > ```
-> https://api.telegram.org/bot123456:ABC.../setWebhook?url=https://functions.poehali.dev/xxx-telegram-bot
+> https://api.telegram.org/bot123456:ABC.../setWebhook?url=https://functions.poehali.dev/xxx-telegram-bot&secret_token=my_super_secret_webhook_token_12345
 > ```
 >
-> После этого бот начнёт получать сообщения!
+> **3. Добавьте секрет в проект:**
+> ```python
+> put_secret("TELEGRAM_WEBHOOK_SECRET", "my_super_secret_webhook_token_12345")
+> ```
+>
+> После этого бот начнёт получать сообщения, и только Telegram сможет вызывать webhook!
 
 ### Шаг 6: Добавление секретов для бота
 
