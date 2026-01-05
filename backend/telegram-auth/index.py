@@ -423,10 +423,6 @@ def handler(event, context):
         except json.JSONDecodeError:
             return cors_response(400, {"error": "Invalid JSON"})
 
-    # Get headers
-    headers = event.get("headers") or {}
-    headers = {k.lower(): v for k, v in headers.items()}
-
     conn = None
     try:
         conn = get_db_connection()
