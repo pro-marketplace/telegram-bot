@@ -1,2 +1,2 @@
 psycopg2-binary
-requests
+pyTelegramBotAPI>=4.14.0,<5.0.0
